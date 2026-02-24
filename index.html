@@ -1,0 +1,57 @@
+<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>CC15 Admin</title>
+<style>
+body{font-family:system-ui;margin:0;background:#0b0f0e;color:#e8f0ee}
+.wrap{max-width:1100px;margin:20px auto;padding:16px}
+.card{background:#121a18;border:1px solid #23322e;border-radius:14px;padding:14px;margin:12px 0}
+input,button,select{padding:10px;border-radius:10px;border:1px solid #2a3b35;background:#0e1513;color:#e8f0ee}
+button{cursor:pointer} table{width:100%;border-collapse:collapse} td,th{border-bottom:1px solid #23322e;padding:8px;text-align:left}
+.small{opacity:.75;font-size:12px}
+</style></head><body><div class="wrap">
+<h2>CombatCart 15 – Admin</h2>
+<div class="card">
+<div class="small">Supabase URL + ANON hier eintragen (Service Role NIE ins Frontend).</div>
+<input id="url" placeholder="SUPABASE_URL" style="width:48%"/> <input id="anon" placeholder="SUPABASE_ANON_KEY" style="width:48%"/>
+<div style="margin-top:10px">
+<input id="email" placeholder="Admin Email"/> <input id="pw" type="password" placeholder="Passwort"/>
+<button id="login">Login</button> <button id="logout">Logout</button>
+<span id="status" class="small"></span>
+</div></div>
+
+<div class="card"><h3>Produkte (cc15_products)</h3>
+<button id="loadP">Reload</button>
+<table id="pt"></table></div>
+
+<div class="card"><h3>Slots (cc15_slots)</h3>
+<button id="loadS">Reload</button>
+<table id="st"></table></div>
+
+<div class="card"><h3>Orders (cc15_orders)</h3>
+<button id="loadO">Reload</button>
+<table id="ot"></table></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+let sb=null;
+const $=id=>document.getElementById(id);
+const setStatus=t=>$("status").textContent="  "+t;
+
+function init(){ sb = supabase.createClient($("url").value.trim(), $("anon").value.trim()); setStatus("Client ready"); }
+$("url").addEventListener("change",init); $("anon").addEventListener("change",init);
+
+$("login").onclick=async()=>{ if(!sb) init();
+const {data,error}=await sb.auth.signInWithPassword({email:$("email").value.trim(),password:$("pw").value});
+setStatus(error?("Login error: "+error.message):("Logged in: "+data.user.email)); };
+$("logout").onclick=async()=>{ if(!sb) return; await sb.auth.signOut(); setStatus("Logged out"); };
+
+async function load(table, el, cols){
+const {data,error}=await sb.from(table).select("*").limit(200).order(cols[0]||"created_at",{ascending:false});
+if(error){ el.innerHTML="<tr><td>ERROR: "+error.message+"</td></tr>"; return; }
+let h="<tr>"+cols.map(c=>"<th>"+c+"</th>").join("")+"</tr>";
+h+=data.map(r=>"<tr>"+cols.map(c=>"<td>"+(r[c]??"")+"</td>").join("")+"</tr>").join("");
+el.innerHTML=h||"<tr><td>empty</td></tr>";
+}
+$("loadP").onclick=()=>load("cc15_products",$("pt"),["id","name_de","name_fr","price_chf","image_path","active"]);
+$("loadS").onclick=()=>load("cc15_slots",$("st"),["slot_no","slot_active","product_id","updated_at"]);
+$("loadO").onclick=()=>load("cc15_orders",$("ot"),["id","created_at","location","customer_name","customer_phone","status"]);
+</script></div></body></html>
