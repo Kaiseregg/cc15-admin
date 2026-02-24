@@ -44,14 +44,146 @@ const {data,error}=await sb.auth.signInWithPassword({email:$("email").value.trim
 setStatus(error?("Login error: "+error.message):("Logged in: "+data.user.email)); };
 $("logout").onclick=async()=>{ if(!sb) return; await sb.auth.signOut(); setStatus("Logged out"); };
 
-async function load(table, el, cols){
-const {data,error}=await sb.from(table).select("*").limit(200).order(cols[0]||"created_at",{ascending:false});
-if(error){ el.innerHTML="<tr><td>ERROR: "+error.message+"</td></tr>"; return; }
-let h="<tr>"+cols.map(c=>"<th>"+c+"</th>").join("")+"</tr>";
-h+=data.map(r=>"<tr>"+cols.map(c=>"<td>"+(r[c]??"")+"</td>").join("")+"</tr>").join("");
-el.innerHTML=h||"<tr><td>empty</td></tr>";
+
+function fmtPrice(v){
+  if(v===null || v===undefined || v==="") return "";
+  const n = Number(v);
+  if(Number.isFinite(n)) return n.toFixed(2);
+  return String(v);
 }
-$("loadP").onclick=()=>load("cc15_products",$("pt"),["id","name_de","name_fr","price_chf","image_path","active"]);
-$("loadS").onclick=()=>load("cc15_slots",$("st"),["slot_no","slot_active","product_id","updated_at"]);
-$("loadO").onclick=()=>load("cc15_orders",$("ot"),["id","created_at","location","customer_name","customer_phone","status"]);
+
+let productsCache = [];
+let productsById = {};
+
+function productLabel(p){
+  const name = (p.name_de || p.name_fr || p.id || "").toString();
+  const price = (p.price_chf===null || p.price_chf===undefined) ? "" : (" CHF " + fmtPrice(p.price_chf));
+  return name + price;
+}
+
+async function loadSimple(table, el, cols, orderCol){
+  const q = sb.from(table).select("*").limit(200);
+  if(orderCol) q.order(orderCol,{ascending:true});
+  else q.order(cols[0] || "created_at",{ascending:false});
+  const {data, error} = await q;
+  if(error){ el.innerHTML = `<tr><td>ERROR: ${error.message}</td></tr>`; return; }
+  let h = "<tr>"+cols.map(c=>`<th>${c}</th>`).join("")+"</tr>";
+  for(const row of data){
+    h += "<tr>"+cols.map(c=>`<td>${(row[c] ?? "")}</td>`).join("")+"</tr>";
+  }
+  el.innerHTML = h;
+}
+
+async function loadProducts(){
+  const {data, error} = await sb.from("cc15_products")
+    .select("id,name_de,name_fr,price_chf,image_path,active,created_at,updated_at")
+    .order("created_at",{ascending:false})
+    .limit(500);
+  if(error){ $("pt").innerHTML = `<tr><td>ERROR: ${error.message}</td></tr>`; return; }
+
+  productsCache = data || [];
+  productsById = {};
+  for(const p of productsCache) productsById[p.id] = p;
+
+  let cols = ["id","name_de","name_fr","price_chf","image_path","active"];
+  let h = "<tr>"+cols.map(c=>`<th>${c}</th>`).join("")+"</tr>";
+  for(const p of productsCache){
+    h += "<tr>"
+      + `<td>${p.id}</td>`
+      + `<td>${p.name_de ?? ""}</td>`
+      + `<td>${p.name_fr ?? ""}</td>`
+      + `<td>${fmtPrice(p.price_chf)}</td>`
+      + `<td>${p.image_path ?? ""}</td>`
+      + `<td>${p.active ? "true" : "false"}</td>`
+      + "</tr>";
+  }
+  $("pt").innerHTML = h;
+}
+
+function buildProductOptions(selectedId){
+  const options = [`<option value="">(leer)</option>`];
+  for(const p of productsCache){
+    if(p.active === false) continue; // nur aktive zeigen
+    const sel = (p.id === selectedId) ? " selected" : "";
+    options.push(`<option value="${p.id}"${sel}>${productLabel(p)}</option>`);
+  }
+  return options.join("");
+}
+
+async function updateSlot(slot_no, patch){
+  const {error} = await sb.from("cc15_slots").update(patch).eq("slot_no", slot_no);
+  if(error) throw error;
+}
+
+async function loadSlots(){
+  if(!productsCache.length) await loadProducts();
+
+  const {data, error} = await sb.from("cc15_slots")
+    .select("slot_no,slot_active,product_id,updated_at")
+    .order("slot_no",{ascending:true})
+    .limit(200);
+  if(error){ $("st").innerHTML = `<tr><td>ERROR: ${error.message}</td></tr>`; return; }
+
+  let h = "<tr><th>slot_no</th><th>slot_active</th><th>product</th><th>updated_at</th></tr>";
+
+  for(const row of data){
+    const pid = row.product_id || "";
+    const selectId = `pid_${row.slot_no}`;
+    const chkId = `act_${row.slot_no}`;
+
+    h += `<tr>
+      <td>${row.slot_no}</td>
+      <td><input type="checkbox" id="${chkId}" ${row.slot_active ? "checked" : ""}></td>
+      <td>
+        <select id="${selectId}" style="width:100%; padding:8px; border-radius:10px;">
+          ${buildProductOptions(pid)}
+        </select>
+      </td>
+      <td>${row.updated_at ?? ""}</td>
+    </tr>`;
+  }
+
+  $("st").innerHTML = h;
+
+  // Event handler nach Render
+  for(const row of data){
+    const selectEl = document.getElementById(`pid_${row.slot_no}`);
+    const chkEl = document.getElementById(`act_${row.slot_no}`);
+
+    if(selectEl){
+      selectEl.addEventListener("change", async (e)=>{
+        try{
+          setStatus(`Saving slot ${row.slot_no}...`);
+          const v = e.target.value || null;
+          await updateSlot(row.slot_no, { product_id: v });
+          setStatus(`Saved slot ${row.slot_no}`);
+        }catch(err){
+          console.error(err);
+          setStatus("ERROR: " + (err?.message || err));
+          // reload to reflect DB state
+          await loadSlots();
+        }
+      });
+    }
+
+    if(chkEl){
+      chkEl.addEventListener("change", async (e)=>{
+        try{
+          setStatus(`Saving slot ${row.slot_no}...`);
+          const v = !!e.target.checked;
+          await updateSlot(row.slot_no, { slot_active: v });
+          setStatus(`Saved slot ${row.slot_no}`);
+        }catch(err){
+          console.error(err);
+          setStatus("ERROR: " + (err?.message || err));
+          await loadSlots();
+        }
+      });
+    }
+  }
+}
+
+$("loadP").onclick=loadProducts;
+$("loadS").onclick=loadSlots;
+$("loadO").onclick=()=>loadSimple("cc15_orders",$("ot"),["id","created_at","status","payment_method","location","pickup_time","customer_first_name","customer_last_name","customer_phone","total_chf"],"created_at");
 </script></div></body></html>
