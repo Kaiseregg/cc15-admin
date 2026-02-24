@@ -19,7 +19,11 @@
     .btnPlus{font-weight:800;font-size:18px;line-height:1;padding:8px 12px;border-radius:12px}
     .thumb{width:64px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #23322e;background:#0e1513}
     .danger{border-color:#6b2f2f}
-  </style>
+  
+  /* Keep big tables inside the card (no overflow outside) */
+  .card table{display:block; overflow:auto; max-height:520px;}
+  .card table thead, .card table tbody{display:table; width:100%; table-layout:fixed;}
+</style>
 </head>
 <body>
   <div class="wrap">
@@ -80,6 +84,14 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
       let sb=null;
+
+  // --- helpers ---
+  const esc = (v) => String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
       const $=id=>document.getElementById(id);
       const setStatus=t=>$("status").textContent="  "+t;
 
