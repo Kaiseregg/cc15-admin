@@ -1,501 +1,66 @@
-<!doctype html>
+
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>CC15 Admin</title>
-  <style>
-    body{font-family:system-ui;margin:0;background:#0b0f0e;color:#e8f0ee}
-    .wrap{max-width:1100px;margin:20px auto;padding:16px}
-    .card{background:#121a18;border:1px solid #23322e;border-radius:14px;padding:14px;margin:12px 0}
-    input,button,select{padding:10px;border-radius:10px;border:1px solid #2a3b35;background:#0e1513;color:#e8f0ee}
-    button{cursor:pointer}
-    table{width:100%;border-collapse:collapse}
-    td,th{border-bottom:1px solid #23322e;padding:8px;text-align:left;vertical-align:top}
-    .small{opacity:.75;font-size:12px}
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    .grow{flex:1;min-width:260px}
-    .pill{display:inline-flex;gap:8px;align-items:center;padding:6px 10px;border:1px solid #23322e;border-radius:999px;background:#0e1513}
-    .btnPlus{font-weight:800;font-size:18px;line-height:1;padding:8px 12px;border-radius:12px}
-    .thumb{width:64px;height:48px;object-fit:cover;border-radius:10px;border:1px solid #23322e;background:#0e1513}
-    .danger{border-color:#6b2f2f}
-  
-  /* Keep big tables inside the card (no overflow outside) */
-  .card table{display:block; overflow:auto; max-height:520px;}
-  .card table thead, .card table tbody{display:table; width:100%; table-layout:fixed;}
+<meta charset="UTF-8">
+<title>CombatCart 15 – Admin</title>
+<style>
+body{font-family:Arial;background:#0b1c1c;color:#fff;padding:20px}
+.card{background:#122;border-radius:12px;padding:20px;margin-bottom:30px;overflow:auto}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px;border-bottom:1px solid #333;text-align:left}
+button{padding:6px 10px;border-radius:6px;border:none;background:#2a5;color:#fff}
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <h2>CombatCart 15 – Admin</h2>
 
-    <div class="card">
-      <div class="small">Supabase URL + ANON hier eintragen (Service Role NIE ins Frontend). Wird lokal gespeichert (nur in diesem Browser).</div>
-      <div class="row" style="margin-top:8px">
-        <input id="url" class="grow" placeholder="SUPABASE_URL"/>
-        <input id="anon" class="grow" placeholder="SUPABASE_ANON_KEY"/>
-        <button id="clearCfg" class="danger">Reset</button>
-      </div>
-      <div class="row" style="margin-top:10px">
-        <input id="email" placeholder="Admin Email"/>
-        <input id="pw" type="password" placeholder="Passwort"/>
-        <button id="login">Login</button>
-        <button id="logout">Logout</button>
-        <span id="status" class="small"></span>
-      </div>
-    </div>
+<h2>Orders (cc15_orders)</h2>
+<div class="card">
+<button onclick="loadOrders()">Reload</button>
+<div id="orders"></div>
+</div>
 
-    <div class="card">
-      <div class="row" style="justify-content:space-between">
-        <h3 style="margin:0">Produkte (cc15_products)</h3>
-        <div class="row">
-          <button id="loadP">Reload</button>
-          <button id="toggleAdd" class="btnPlus" title="Neues Produkt">+</button>
-        </div>
-      </div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+function esc(s){return s?String(s).replace(/[&<>"]/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[m])):''}
 
-      <div id="addBox" style="display:none;margin-top:10px">
-        <div class="row">
-          <input id="p_name_de" placeholder="name_de"/>
-          <input id="p_name_fr" placeholder="name_fr"/>
-          <input id="p_price" placeholder="price_chf (z.B. 3.00)"/>
-          <label class="pill"><input id="p_active" type="checkbox" checked> active</label>
-          <input id="p_file" type="file" accept="image/*" />
-          <button id="addP">Add</button>
-        </div>
-        <div class="small" style="margin-top:6px">Tipp: Bilder ideal 800×600 px (oder ähnlich) und als PNG/JPG. Upload geht in Bucket <b>product-images</b> und schreibt <b>image_path</b> automatisch.</div>
-      </div>
+const url = localStorage.getItem("sb_url");
+const key = localStorage.getItem("sb_key");
 
-      <table id="pt" style="margin-top:10px"></table>
-    </div>
+if(!url||!key){
+  const u = prompt("Supabase URL:");
+  const k = prompt("Supabase ANON KEY:");
+  localStorage.setItem("sb_url",u);
+  localStorage.setItem("sb_key",k);
+  location.reload();
+}
 
-    <div class="card">
-      <h3>Slots (cc15_slots)</h3>
-      <button id="loadS">Reload</button>
-      <table id="st"></table>
-    </div>
+const sb = supabase.createClient(localStorage.getItem("sb_url"),localStorage.getItem("sb_key"));
 
-    <div class="card">
-      <h3>Orders (cc15_orders)</h3>
-      <button id="loadO">Reload</button>
-      <table id="ot"></table>
-    </div>
+async function loadOrders(){
+  const {data:orders,error} = await sb.from("cc15_orders").select("*").order("created_at",{ascending:false});
+  if(error){alert(error.message);return}
+  const ids = orders.map(o=>o.id);
+  const {data:items} = await sb.from("cc15_order_items").select("*").in("order_id",ids);
+  const map={};
+  (items||[]).forEach(i=>{
+    map[i.order_id]=(map[i.order_id]||[]).concat(`${i.product_name} x${i.qty}`)
+  });
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script>
-      let sb=null;
+  let html="<table><tr><th>Date</th><th>Location</th><th>Total</th><th>Items</th></tr>";
+  orders.forEach(o=>{
+    html+=`<tr>
+      <td>${esc(o.created_at)}</td>
+      <td>${esc(o.location)}</td>
+      <td>${o.total_chf} CHF</td>
+      <td>${(map[o.id]||[]).join("<br>")||"-"}</td>
+    </tr>`
+  });
+  html+="</table>";
+  document.getElementById("orders").innerHTML=html;
+}
 
-  // --- helpers ---
-  const esc = (v) => String(v ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-      const $=id=>document.getElementById(id);
-      const setStatus=t=>$("status").textContent="  "+t;
-
-      const LS_URL = "CC15_SUPABASE_URL";
-      const LS_ANON = "CC15_SUPABASE_ANON";
-
-      function saveCfg(){
-        localStorage.setItem(LS_URL, $("url").value.trim());
-        localStorage.setItem(LS_ANON, $("anon").value.trim());
-      }
-
-      function loadCfg(){
-        const u = localStorage.getItem(LS_URL) || "";
-        const a = localStorage.getItem(LS_ANON) || "";
-        if(u) $("url").value = u;
-        if(a) $("anon").value = a;
-      }
-
-      function init(){
-        const u = $("url").value.trim();
-        const a = $("anon").value.trim();
-        if(!u || !a){ setStatus("Bitte URL + ANON eintragen"); return; }
-        sb = supabase.createClient(u, a);
-        setStatus("Client ready");
-      }
-
-      // auto-load saved config
-      loadCfg();
-      if($("url").value && $("anon").value) init();
-
-      $("url").addEventListener("input", ()=>{ saveCfg(); init(); });
-      $("anon").addEventListener("input", ()=>{ saveCfg(); init(); });
-
-      $("clearCfg").onclick=()=>{
-        localStorage.removeItem(LS_URL);
-        localStorage.removeItem(LS_ANON);
-        $("url").value="";
-        $("anon").value="";
-        sb=null;
-        setStatus("Reset ok");
-      };
-
-      $("login").onclick=async()=>{
-        if(!sb) init();
-        if(!sb) return;
-        const {data,error}=await sb.auth.signInWithPassword({email:$("email").value.trim(),password:$("pw").value});
-        setStatus(error?("Login error: "+error.message):("Logged in: "+data.user.email));
-      };
-      $("logout").onclick=async()=>{ if(!sb) return; await sb.auth.signOut(); setStatus("Logged out"); };
-
-      function fmtPrice(v){
-        if(v===null || v===undefined || v==="") return "";
-        const n = Number(v);
-        if(Number.isFinite(n)) return n.toFixed(2);
-        return String(v);
-      }
-
-      let productsCache = [];
-      let productsById = {};
-
-      function productLabel(p){
-        const name = (p.name_de || p.name_fr || p.id || "").toString();
-        const price = (p.price_chf===null || p.price_chf===undefined) ? "" : (" CHF " + fmtPrice(p.price_chf));
-        return name + price;
-      }
-
-      async function loadSimple(table, el, cols, orderCol){
-        const q = sb.from(table).select("*").limit(200);
-        if(orderCol) q.order(orderCol,{ascending:true});
-        else q.order(cols[0] || "created_at",{ascending:false});
-        const {data, error} = await q;
-        if(error){ el.innerHTML = `<tr><td>ERROR: ${error.message}</td></tr>`; return; }
-        let h = "<tr>"+cols.map(c=>`<th>${c}</th>`).join("")+"</tr>";
-        for(const row of data){
-          h += "<tr>"+cols.map(c=>`<td>${(row[c] ?? "")}</td>`).join("")+"</tr>";
-        }
-        el.innerHTML = h;
-      }
-
-      function storagePublicUrl(path){
-        // Bucket: product-images (PUBLIC)
-        // we store only path in DB, kiosk builds correct URL itself.
-        return path || "";
-      }
-
-      async function uploadProductImage(productId, file){
-        if(!file) throw new Error("Kein File gewählt");
-        const safeName = (file.name || "image").replace(/[^a-zA-Z0-9._-]/g, "_");
-        const path = `${productId}/${Date.now()}_${safeName}`;
-
-        const {error:upErr} = await sb.storage.from("product-images").upload(path, file, {
-          upsert: true,
-          contentType: file.type || "image/png",
-          cacheControl: "3600",
-        });
-        if(upErr) throw upErr;
-
-        const {error:dbErr} = await sb.from("cc15_products").update({ image_path: path }).eq("id", productId);
-        if(dbErr) throw dbErr;
-
-        return path;
-      }
-
-      async function loadProducts(){
-        const {data, error} = await sb.from("cc15_products")
-          .select("id,name_de,name_fr,price_chf,image_path,active,created_at,updated_at")
-          .order("created_at",{ascending:false})
-          .limit(500);
-        if(error){ $("pt").innerHTML = `<tr><td>ERROR: ${error.message}</td></tr>`; return; }
-
-        productsCache = data || [];
-        productsById = {};
-        for(const p of productsCache) productsById[p.id] = p;
-
-        let h = "<tr>"
-          + "<th>id</th><th>name_de</th><th>name_fr</th><th>price_chf</th><th>image</th><th>image_path</th><th>active</th><th>upload</th>"
-          + "</tr>";
-
-        for(const p of productsCache){
-          const thumb = p.image_path ? `<img class="thumb" alt="" src="${await buildStorageUrl(p.image_path)}" onerror="this.style.opacity=.2">` : "";
-          h += "<tr>"
-            + `<td style="font-size:12px">${p.id}</td>`
-            + `<td>${p.name_de ?? ""}</td>`
-            + `<td>${p.name_fr ?? ""}</td>`
-            + `<td>${fmtPrice(p.price_chf)}</td>`
-            + `<td>${thumb}</td>`
-            + `<td style="font-size:12px">${p.image_path ?? ""}</td>`
-            + `<td>${p.active ? "true" : "false"}</td>`
-            + `<td>
-                <input type="file" accept="image/*" id="up_${p.id}" style="width:210px"/>
-                <button data-pid="${p.id}" class="btnUp">Upload</button>
-              </td>`
-            + "</tr>";
-        }
-
-        $("pt").innerHTML = h;
-
-        // bind upload buttons
-        document.querySelectorAll(".btnUp").forEach(btn=>{
-          btn.addEventListener("click", async ()=>{
-            const pid = btn.getAttribute("data-pid");
-            const inp = document.getElementById(`up_${pid}`);
-            const file = inp?.files?.[0];
-            try{
-              setStatus("Uploading..." );
-              await uploadProductImage(pid, file);
-              setStatus("Upload ok");
-              await loadProducts();
-            }catch(e){
-              console.error(e);
-              setStatus("UPLOAD ERROR: " + (e?.message || e));
-            }
-          });
-        });
-      }
-
-      async function buildStorageUrl(imagePath){
-        if(!imagePath) return "";
-        // Use signed/public URL helper (bucket is public, so getPublicUrl works)
-        try{
-          const { data } = sb.storage.from("product-images").getPublicUrl(imagePath);
-          return data?.publicUrl || "";
-        }catch(e){
-          return "";
-        }
-      }
-
-      function buildProductOptions(selectedId){
-        const options = [`<option value="">(leer)</option>`];
-        for(const p of productsCache){
-          if(p.active === false) continue;
-          const sel = (p.id === selectedId) ? " selected" : "";
-          options.push(`<option value="${p.id}"${sel}>${productLabel(p)}</option>`);
-        }
-        return options.join("");
-      }
-
-      async function updateSlot(slot_no, patch){
-        const {error} = await sb.from("cc15_slots").update(patch).eq("slot_no", slot_no);
-        if(error) throw error;
-      }
-
-      async function loadSlots(){
-        if(!productsCache.length) await loadProducts();
-        const {data, error} = await sb.from("cc15_slots")
-          .select("slot_no,slot_active,product_id,updated_at")
-          .order("slot_no",{ascending:true})
-          .limit(200);
-        if(error){ $("st").innerHTML = `<tr><td>ERROR: ${error.message}</td></tr>`; return; }
-
-        let h = "<tr><th>slot_no</th><th>slot_active</th><th>product</th><th>updated_at</th></tr>";
-        for(const row of data){
-          const pid = row.product_id || "";
-          const selectId = `pid_${row.slot_no}`;
-          const chkId = `act_${row.slot_no}`;
-          h += `<tr>
-            <td>${row.slot_no}</td>
-            <td><input type="checkbox" id="${chkId}" ${row.slot_active ? "checked" : ""}></td>
-            <td>
-              <select id="${selectId}" style="width:100%; padding:8px; border-radius:10px;">
-                ${buildProductOptions(pid)}
-              </select>
-            </td>
-            <td>${row.updated_at ?? ""}</td>
-          </tr>`;
-        }
-        $("st").innerHTML = h;
-
-        for(const row of data){
-          const selectEl = document.getElementById(`pid_${row.slot_no}`);
-          const chkEl = document.getElementById(`act_${row.slot_no}`);
-
-          if(selectEl){
-            selectEl.addEventListener("change", async (e)=>{
-              try{
-                setStatus(`Saving slot ${row.slot_no}...`);
-                const v = e.target.value || null;
-                await updateSlot(row.slot_no, { product_id: v });
-                setStatus(`Saved slot ${row.slot_no}`);
-              }catch(err){
-                console.error(err);
-                setStatus("ERROR: " + (err?.message || err));
-                await loadSlots();
-              }
-            });
-          }
-
-          if(chkEl){
-            chkEl.addEventListener("change", async (e)=>{
-              try{
-                setStatus(`Saving slot ${row.slot_no}...`);
-                const v = !!e.target.checked;
-                await updateSlot(row.slot_no, { slot_active: v });
-                setStatus(`Saved slot ${row.slot_no}`);
-              }catch(err){
-                console.error(err);
-                setStatus("ERROR: " + (err?.message || err));
-                await loadSlots();
-              }
-            });
-          }
-        }
-      }
-
-      async function addProduct(){
-        if(!sb) init();
-        if(!sb) return;
-        const name_de = $("p_name_de").value.trim();
-        const name_fr = $("p_name_fr").value.trim();
-        const price_chf = $("p_price").value.trim();
-        const active = !!$("p_active").checked;
-        const file = $("p_file").files?.[0] || null;
-
-        const priceNum = price_chf === "" ? null : Number(price_chf);
-        if(price_chf !== "" && !Number.isFinite(priceNum)){
-          setStatus("Preis ungültig (z.B. 3.00)");
-          return;
-        }
-
-        setStatus("Adding product...");
-        const {data, error} = await sb.from("cc15_products").insert({
-          name_de: name_de || null,
-          name_fr: name_fr || null,
-          price_chf: priceNum,
-          active,
-        }).select("id").single();
-
-        if(error){ setStatus("ADD ERROR: " + error.message); return; }
-
-        const newId = data?.id;
-        if(file){
-          try{ await uploadProductImage(newId, file); }catch(e){ console.error(e); setStatus("Produkt ok, aber Upload Fehler: " + (e?.message||e)); }
-        }
-
-        $("p_name_de").value = "";
-        $("p_name_fr").value = "";
-        $("p_price").value = "";
-        $("p_file").value = "";
-
-        setStatus("Product added");
-        await loadProducts();
-      }
-
-      $("toggleAdd").onclick=()=>{
-        const box = $("addBox");
-        box.style.display = (box.style.display === "none") ? "block" : "none";
-      };
-
-
-      async function loadOrders(){
-        // tries to include order items + product names (needs FK + table names)
-        try{
-          const sel = "id,created_at,status,payment_method,location,pickup_time,customer_first_name,customer_last_name,customer_phone,total_chf,cc15_order_items:cc15_order_items(order_id,qty,product_id,cc15_products(name_de,name_fr,price_chf))";
-          const res = await sb.from("cc15_orders").select(sel).order("created_at",{ascending:false}).limit(200);
-          if(res.error) throw res.error;
-          const data = res.data || [];
-
-          let html = "<thead><tr>"
-            + "<th>created_at</th><th>status</th><th>location</th><th>pickup</th>"
-            + "<th>customer</th><th>phone</th><th>total</th><th>items</th>"
-            + "</tr></thead><tbody>";
-
-          for(const o of data){
-            const customer = [o.customer_first_name,o.customer_last_name].filter(Boolean).join(" ") || "-";
-            const phone = o.customer_phone || "-";
-            const pickup = o.pickup_time || "-";
-            const created = o.created_at ? new Date(o.created_at).toLocaleString() : "-";
-            const total = (typeof o.total_chf === "number")
-              ? (o.total_chf.toFixed(2) + " CHF")
-              : ((o.total_chf ?? "-") + (o.total_chf ? " CHF" : ""));
-
-            const itemsArr = (o.cc15_order_items || []).map(it=>{
-              const p = it.cc15_products || {};
-              const nm = p.name_de || p.name_fr || it.product_id || "?";
-              const q = (it.qty ?? 1);
-              return q + "× " + nm;
-            });
-            const items = itemsArr.length ? itemsArr.join(" · ") : "-";
-
-            html += "<tr>"
-              + "<td>" + esc(created) + "</td>"
-              + "<td>" + esc(o.status || "-") + "</td>"
-              + "<td>" + esc(o.location || "-") + "</td>"
-              + "<td>" + esc(pickup) + "</td>"
-              + "<td>" + esc(customer) + "</td>"
-              + "<td>" + esc(phone) + "</td>"
-              + "<td>" + esc(total) + "</td>"
-              + "<td class='items'>" + esc(items) + "</td>"
-              + "</tr>";
-          }
-          html += "</tbody>";
-          $("ot").innerHTML = html;
-        }catch(e){
-          console.warn("Orders nested select failed, using 2-step fetch (no FK needed):", e);
-
-          // 1) fetch orders
-          const r1 = await sb.from("cc15_orders")
-            .select("id,created_at,status,payment_method,location,pickup_time,customer_first_name,customer_last_name,customer_phone,total_chf")
-            .order("created_at",{ascending:false}).limit(200);
-          if(r1.error) throw r1.error;
-          const orders = r1.data || [];
-
-          // 2) fetch all order items for these orders
-          const ids = orders.map(o=>o.id).filter(Boolean);
-          const itemsMap = new Map();
-          if(ids.length){
-            const r2 = await sb.from("cc15_order_items")
-              .select("order_id,product_name,qty,line_total_chf")
-              .in("order_id", ids);
-            if(!r2.error && r2.data){
-              for(const it of r2.data){
-                const arr = itemsMap.get(it.order_id) || [];
-                const line = `${it.product_name||"Item"} ×${it.qty ?? 1}${(it.line_total_chf!=null)?` (${Number(it.line_total_chf).toFixed(2)} CHF)`:''}`;
-                arr.push(line);
-                itemsMap.set(it.order_id, arr);
-              }
-            }
-          }
-
-          // render
-          let html = "<thead><tr>"
-            + "<th>created_at</th><th>status</th><th>location</th><th>pickup</th>"
-            + "<th>customer</th><th>phone</th><th>total</th><th>items</th>"
-            + "</tr></thead><tbody>";
-
-          for(const o of orders){
-            const customer = [o.customer_first_name,o.customer_last_name].filter(Boolean).join(" ") || "-";
-            const phone = o.customer_phone || "-";
-            const pickup = o.pickup_time || "-";
-            const created = o.created_at ? new Date(o.created_at).toLocaleString() : "-";
-            const total = (typeof o.total_chf === "number")
-              ? (o.total_chf.toFixed(2) + " CHF")
-              : ((o.total_chf ?? "-") + (o.total_chf ? " CHF" : ""));
-
-            const itemsArr = itemsMap.get(o.id) || [];
-            const items = itemsArr.length ? itemsArr.join(" · ") : "-";
-
-            html += "<tr>"
-              + "<td>" + esc(created) + "</td>"
-              + "<td>" + esc(o.status || "-") + "</td>"
-              + "<td>" + esc(o.location || "-") + "</td>"
-              + "<td>" + esc(pickup) + "</td>"
-              + "<td>" + esc(customer) + "</td>"
-              + "<td>" + esc(phone) + "</td>"
-              + "<td>" + esc(total) + "</td>"
-              + "<td class='items'>" + esc(items) + "</td>"
-              + "</tr>";
-          }
-          html += "</tbody>";
-          $("ot").innerHTML = html;
-        }
-      }
-
-      $("addP").onclick=addProduct;
-      $("loadP").onclick=()=>{ if(!sb) init(); if(sb) loadProducts(); };
-      $("loadS").onclick=()=>{ if(!sb) init(); if(sb) loadSlots(); };
-      $("loadO").onclick=()=>{ if(!sb) init(); if(sb) loadOrders(); };
-
-      // If already configured, load products quickly
-      if(sb){
-        // don’t auto-load slots/orders to keep it light
-        loadProducts().catch(()=>{});
-      }
-    </script>
-  </div>
+loadOrders();
+</script>
 </body>
 </html>
