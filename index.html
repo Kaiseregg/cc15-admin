@@ -413,8 +413,63 @@
           html += "</tbody>";
           $("ot").innerHTML = html;
         }catch(e){
-          console.warn("Orders nested select failed, fallback to simple list:", e);
-          loadSimple("cc15_orders",$("ot"),["id","created_at","status","payment_method","location","pickup_time","customer_first_name","customer_last_name","customer_phone","total_chf"],"created_at");
+          console.warn("Orders nested select failed, using 2-step fetch (no FK needed):", e);
+
+          // 1) fetch orders
+          const r1 = await sb.from("cc15_orders")
+            .select("id,created_at,status,payment_method,location,pickup_time,customer_first_name,customer_last_name,customer_phone,total_chf")
+            .order("created_at",{ascending:false}).limit(200);
+          if(r1.error) throw r1.error;
+          const orders = r1.data || [];
+
+          // 2) fetch all order items for these orders
+          const ids = orders.map(o=>o.id).filter(Boolean);
+          const itemsMap = new Map();
+          if(ids.length){
+            const r2 = await sb.from("cc15_order_items")
+              .select("order_id,product_name,qty,line_total_chf")
+              .in("order_id", ids);
+            if(!r2.error && r2.data){
+              for(const it of r2.data){
+                const arr = itemsMap.get(it.order_id) || [];
+                const line = `${it.product_name||"Item"} ×${it.qty ?? 1}${(it.line_total_chf!=null)?` (${Number(it.line_total_chf).toFixed(2)} CHF)`:''}`;
+                arr.push(line);
+                itemsMap.set(it.order_id, arr);
+              }
+            }
+          }
+
+          // render
+          let html = "<thead><tr>"
+            + "<th>created_at</th><th>status</th><th>location</th><th>pickup</th>"
+            + "<th>customer</th><th>phone</th><th>total</th><th>items</th>"
+            + "</tr></thead><tbody>";
+
+          for(const o of orders){
+            const customer = [o.customer_first_name,o.customer_last_name].filter(Boolean).join(" ") || "-";
+            const phone = o.customer_phone || "-";
+            const pickup = o.pickup_time || "-";
+            const created = o.created_at ? new Date(o.created_at).toLocaleString() : "-";
+            const total = (typeof o.total_chf === "number")
+              ? (o.total_chf.toFixed(2) + " CHF")
+              : ((o.total_chf ?? "-") + (o.total_chf ? " CHF" : ""));
+
+            const itemsArr = itemsMap.get(o.id) || [];
+            const items = itemsArr.length ? itemsArr.join(" · ") : "-";
+
+            html += "<tr>"
+              + "<td>" + esc(created) + "</td>"
+              + "<td>" + esc(o.status || "-") + "</td>"
+              + "<td>" + esc(o.location || "-") + "</td>"
+              + "<td>" + esc(pickup) + "</td>"
+              + "<td>" + esc(customer) + "</td>"
+              + "<td>" + esc(phone) + "</td>"
+              + "<td>" + esc(total) + "</td>"
+              + "<td class='items'>" + esc(items) + "</td>"
+              + "</tr>";
+          }
+          html += "</tbody>";
+          $("ot").innerHTML = html;
         }
       }
 
